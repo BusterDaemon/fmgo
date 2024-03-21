@@ -48,6 +48,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.table.SetWidth(ms.Width - 4)
 		m.table.SetHeight(ms.Height/2 - 4)
 		m.table.UpdateViewport()
+
 		m.hexDeciph.Width = ms.Width - 4
 		m.hexDeciph.Height = ms.Height/2 - 4
 
@@ -64,27 +65,45 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					))
 
 				if err != nil {
-					hexData = err.Error()
-					m.hexDeciph.SetContent(hexData)
+					m.hexDeciph.SetContent(err.Error())
 				}
 				m.table.SetRows(updateDirectory(m.directory))
 				m.table.SetCursor(0)
 				m.deleteFDirState = DELETE_STATUS_OFF
+				return m, nil
 			}
+
 			if m.deleteFDirState == DELETE_STATUS_OFF {
 				m.deleteFDirState = DELETE_STATUS_ON
+				m.directory = filepath.Join(m.directory, m.table.SelectedRow()[1])
+				return m, nil
 			}
-		case "ctrl+c", "q":
+		case tea.KeyEsc.String(), tea.KeyEscape.String():
+			if m.deleteFDirState == DELETE_STATUS_ON {
+				m.deleteFDirState = DELETE_STATUS_OFF
+				m.directory = filepath.Dir(m.directory)
+			}
+			return m, nil
+		case tea.KeyCtrlC.String(), "q":
 			return m, tea.Quit
-		case "up":
+		case tea.KeyUp.String():
 			m.table.MoveUp(1)
-		case "down":
+		case tea.KeyDown.String():
 			m.table.MoveDown(1)
-		case "end":
+		case tea.KeyEnd.String():
 			m.table.GotoBottom()
-		case "home":
+		case tea.KeyHome.String():
 			m.table.GotoTop()
-		case "enter":
+		case tea.KeyPgDown.String():
+			m.table.MoveDown(lipgloss.Height(m.table.View()))
+		case tea.KeyPgUp.String():
+			m.table.MoveUp(lipgloss.Height(m.table.View()))
+		case tea.KeyBackspace.String():
+			m.directory = filepath.Dir(m.directory)
+			m.files = updateDirectory(m.directory)
+			m.table.SetRows(updateDirectory(m.directory))
+			m.table.SetCursor(0)
+		case tea.KeyEnter.String(), "return":
 			m.hexDeciph.SetContent("")
 			m.directory = filepath.Join(m.directory, m.table.SelectedRow()[1])
 
@@ -124,7 +143,7 @@ func (m Model) View() string {
 
 			fmt.Sprintf(
 				func() string {
-					if m.deleteFDirState == 1 {
+					if m.deleteFDirState == DELETE_STATUS_ON {
 						return CONFIRM_DELETE
 					}
 					return CURRENT_DIRECTORY
@@ -165,7 +184,7 @@ func updateDirectory(directory string) []table.Row {
 	for _, i := range files {
 		stat, err := os.Stat(filepath.Join(directory, i.Name()))
 		if err != nil {
-			return nil
+			continue
 		}
 		rows = append(rows, table.Row{
 			stat.Mode().String(),
@@ -190,7 +209,7 @@ func InitialMode() Model {
 			[]table.Column{
 				{
 					Title: "Permissions",
-					Width: 30,
+					Width: 12,
 				},
 				{
 					Title: "File name",
@@ -237,7 +256,6 @@ func readSomeFileData(path string, mode int8) (string, error) {
 	case 1:
 		for _, bf := range buffer {
 			resString += fmt.Sprintf("%x", bf)
-
 			resString += " "
 
 		}
