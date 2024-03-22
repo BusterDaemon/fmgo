@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 
@@ -12,9 +11,14 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+//go:noinline
+func getMBSize(x float32) float32
+
 const (
 	DELETE_STATUS_OFF = iota
 	DELETE_STATUS_ON
+	READ_FILE_ON
+	READ_FILE_OFF
 )
 
 const (
@@ -25,9 +29,11 @@ const (
 type Model struct {
 	files           []table.Row
 	directory       string
+	textBar         string
 	table           table.Model
-	hexDeciph       viewport.Model
 	deleteFDirState int8
+	readFileStatus  uint8
+	fileData        viewport.Model
 	style           lipgloss.Style
 }
 
@@ -45,17 +51,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.style.Width(ms.Width - 4)
 		m.style.Height(ms.Height - 4)
 
-		m.table.SetWidth(ms.Width - 4)
-		m.table.SetHeight(ms.Height/2 - 4)
-		m.table.UpdateViewport()
-
-		m.hexDeciph.Width = ms.Width - 4
-		m.hexDeciph.Height = ms.Height/2 - 4
-
+		switch m.readFileStatus {
+		case READ_FILE_OFF:
+			m.table.SetWidth(ms.Width - 4)
+			m.table.SetHeight(ms.Height - 4)
+			m.table.UpdateViewport()
+		case READ_FILE_ON:
+			m.fileData.Width = ms.Width - 4
+			m.fileData.Height = ms.Height - 4
+		}
 	case tea.KeyMsg:
 		switch ms.String() {
-		case "c":
-			m.hexDeciph.SetContent("")
 		case "delete":
 			if m.deleteFDirState == DELETE_STATUS_ON {
 				err := os.Remove(
@@ -65,7 +71,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					))
 
 				if err != nil {
-					m.hexDeciph.SetContent(err.Error())
+					m.textBar = err.Error()
 				}
 				m.table.SetRows(updateDirectory(m.directory))
 				m.table.SetCursor(0)
@@ -83,28 +89,55 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.deleteFDirState = DELETE_STATUS_OFF
 				m.directory = filepath.Dir(m.directory)
 			}
+
+			if m.readFileStatus == READ_FILE_ON {
+				m.table.Focus()
+				m.readFileStatus = READ_FILE_OFF
+			}
+
 			return m, nil
 		case tea.KeyCtrlC.String(), "q":
 			return m, tea.Quit
 		case tea.KeyUp.String():
-			m.table.MoveUp(1)
+			if m.table.Focused() {
+				m.table.MoveUp(1)
+			} else {
+				m.fileData.LineUp(1)
+			}
 		case tea.KeyDown.String():
-			m.table.MoveDown(1)
+			if m.table.Focused() {
+				m.table.MoveDown(1)
+			} else {
+				m.fileData.LineDown(1)
+			}
 		case tea.KeyEnd.String():
-			m.table.GotoBottom()
+			if m.table.Focused() {
+				m.table.GotoBottom()
+			} else {
+				m.fileData.GotoBottom()
+			}
 		case tea.KeyHome.String():
-			m.table.GotoTop()
+			if m.table.Focused() {
+				m.table.GotoTop()
+			} else {
+				m.fileData.GotoTop()
+			}
 		case tea.KeyPgDown.String():
-			m.table.MoveDown(lipgloss.Height(m.table.View()))
+			if m.table.Focused() {
+				m.table.MoveDown(lipgloss.Height(m.table.View()))
+			}
 		case tea.KeyPgUp.String():
-			m.table.MoveUp(lipgloss.Height(m.table.View()))
+			if m.table.Focused() {
+				m.table.MoveUp(lipgloss.Height(m.table.View()))
+			}
 		case tea.KeyBackspace.String():
-			m.directory = filepath.Dir(m.directory)
-			m.files = updateDirectory(m.directory)
-			m.table.SetRows(updateDirectory(m.directory))
-			m.table.SetCursor(0)
+			if m.table.Focused() {
+				m.directory = filepath.Dir(m.directory)
+				m.files = updateDirectory(m.directory)
+				m.table.SetRows(updateDirectory(m.directory))
+				m.table.SetCursor(0)
+			}
 		case tea.KeyEnter.String(), "return":
-			m.hexDeciph.SetContent("")
 			m.directory = filepath.Join(m.directory, m.table.SelectedRow()[1])
 
 			stat, err := os.Stat(m.directory)
@@ -113,7 +146,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.directory = filepath.Dir(m.directory)
 				m.files = updateDirectory(m.directory)
 				m.table.SetRows(m.files)
-				m.hexDeciph.SetContent(hexData)
+				m.fileData.SetContent(hexData)
 				m.table.SetCursor(0)
 			}
 
@@ -122,12 +155,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.table.SetRows(m.files)
 				m.table.SetCursor(0)
 			} else {
-				hexData, err = readSomeFileData(m.directory, 1)
+				m.readFileStatus = READ_FILE_ON
+				m.table.Blur()
+				hexData, err = readSomeFileData(m.directory, 2)
 				if err != nil {
 					hexData = err.Error()
 				}
 				m.directory = filepath.Dir(m.directory)
-				m.hexDeciph.SetContent(hexData)
+				m.fileData.SetContent(hexData)
+				m.fileData.Width = lipgloss.Width(m.table.View())
+				m.fileData.Height = lipgloss.Height(m.table.View())
 			}
 		}
 	}
@@ -137,29 +174,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) View() string {
 	return m.style.Render(
-		lipgloss.JoinVertical(
-			lipgloss.Top,
-			m.table.View(),
-
-			fmt.Sprintf(
-				func() string {
-					if m.deleteFDirState == DELETE_STATUS_ON {
-						return CONFIRM_DELETE
-					}
-					return CURRENT_DIRECTORY
-				}(),
-				m.directory),
-
-			lipgloss.PlaceHorizontal(
-				lipgloss.Width(
+		func() string {
+			if m.readFileStatus == READ_FILE_OFF {
+				return lipgloss.JoinVertical(
+					lipgloss.Top,
 					m.table.View(),
-				),
-				lipgloss.Center,
-				"Decoded View:",
-				lipgloss.WithWhitespaceChars(lipgloss.BlockBorder().Bottom),
-			),
-			m.hexDeciph.View(),
-		),
+					fmt.Sprintf(
+						func() string {
+							if m.deleteFDirState == DELETE_STATUS_ON {
+								return CONFIRM_DELETE
+							}
+							return CURRENT_DIRECTORY
+						}(),
+						m.directory),
+				)
+			} else {
+				return lipgloss.JoinHorizontal(
+					lipgloss.Center,
+					m.fileData.View(),
+				)
+			}
+		}(),
 	)
 }
 
@@ -189,7 +224,7 @@ func updateDirectory(directory string) []table.Row {
 		rows = append(rows, table.Row{
 			stat.Mode().String(),
 			i.Name(),
-			fmt.Sprintf("%d", stat.Size()),
+			fmt.Sprintf("%.2f MB", getMBSize(float32(stat.Size()))),
 			stat.ModTime().Local().Format("2006-01-02 15:04:05"),
 		})
 	}
@@ -200,6 +235,8 @@ func updateDirectory(directory string) []table.Row {
 func InitialMode() Model {
 	var m = Model{}
 	var err error
+	m.readFileStatus = READ_FILE_OFF
+	m.fileData = viewport.New(10, 10)
 	if m.directory, err = os.Getwd(); err != nil {
 		panic(err)
 	}
@@ -229,7 +266,6 @@ func InitialMode() Model {
 		table.WithRows(updateDirectory(m.directory)),
 	)
 
-	m.hexDeciph = viewport.New(5, 5)
 	m.deleteFDirState = 0
 
 	m.style = lipgloss.NewStyle().
@@ -242,27 +278,22 @@ func InitialMode() Model {
 
 func readSomeFileData(path string, mode int8) (string, error) {
 	var resString string
-	f, err := os.Open(path)
+	f, err := os.ReadFile(path)
 	if err != nil {
 		return err.Error(), err
 	}
-	defer f.Close()
 
-	var buffer [128]byte
-	if _, err = io.ReadFull(f, buffer[:]); err != nil {
-		return "", err
-	}
 	switch mode {
 	case 1:
-		for _, bf := range buffer {
+		for _, bf := range f {
 			resString += fmt.Sprintf("%x", bf)
 			resString += " "
 
 		}
 	case 2:
-		resString = fmt.Sprintf("%s", buffer)
+		resString = string(f)
 	default:
-		resString = fmt.Sprintf("%s", buffer)
+		resString = string(f)
 	}
 
 	return resString, nil
