@@ -1,6 +1,8 @@
-REQUIRED_FILES = (main.go cmd/app/app.go internal/*/*.go)
+SOURCES := $(wildcard *.go)
 
-
-build REQUIRED_FILES:
+build: $(SOURCES)
 	mkdir -p build
-	go build -o build/fmgo.bin
+	go build -o build/fmgo.bin ./main.go
+
+clean:
+	rm -rf ./build
