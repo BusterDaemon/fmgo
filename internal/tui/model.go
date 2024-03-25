@@ -26,6 +26,7 @@ const (
 const (
 	CURRENT_DIRECTORY = "Current directory: %s"
 	CONFIRM_DELETE    = "Are you sure want to delete the %s?"
+	FILE_NAME_MSG     = "Enter new file name: %s"
 )
 
 type Model struct {
@@ -40,12 +41,13 @@ type Model struct {
 }
 
 func (m Model) Init() tea.Cmd {
-	return nil
+	return textinput.Blink
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var (
 		hexData string
+		cmd     tea.Cmd
 	)
 
 	switch ms := msg.(type) {
@@ -102,7 +104,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			return m, nil
-		case tea.KeyCtrlC.String(), "q":
+		case tea.KeyCtrlC.String():
 			return m, tea.Quit
 		case tea.KeyUp.String():
 			if m.table.Focused() {
@@ -144,38 +146,68 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.table.SetCursor(0)
 			}
 		case tea.KeyEnter.String(), "return":
-			m.directory = filepath.Join(m.directory, m.table.SelectedRow()[1])
+			switch m.uiStatus {
+			case NORMAL_STATUS:
+				m.directory = filepath.Join(m.directory, m.table.SelectedRow()[1])
 
-			stat, err := os.Stat(m.directory)
-			if err != nil {
-				hexData = err.Error()
-				m.directory = filepath.Dir(m.directory)
-				m.files = updateDirectory(m.directory)
-				m.table.SetRows(m.files)
-				m.fileData.SetContent(hexData)
-				m.table.SetCursor(0)
-			}
-
-			if stat.IsDir() {
-				m.files = updateDirectory(m.directory)
-				m.table.SetRows(m.files)
-				m.table.SetCursor(0)
-			} else {
-				m.uiStatus = READ_FILE
-				m.table.Blur()
-				hexData, err = readSomeFileData(m.directory, 2)
+				stat, err := os.Stat(m.directory)
 				if err != nil {
 					hexData = err.Error()
+					m.directory = filepath.Dir(m.directory)
+					m.files = updateDirectory(m.directory)
+					m.table.SetRows(m.files)
+					m.fileData.SetContent(hexData)
+					m.table.SetCursor(0)
 				}
-				m.directory = filepath.Dir(m.directory)
-				m.fileData.SetContent(hexData)
-				m.fileData.Width = lipgloss.Width(m.table.View())
-				m.fileData.Height = lipgloss.Height(m.table.View())
+
+				if stat.IsDir() {
+					m.files = updateDirectory(m.directory)
+					m.table.SetRows(m.files)
+					m.table.SetCursor(0)
+				} else {
+					m.uiStatus = READ_FILE
+					m.table.Blur()
+					hexData, err = readSomeFileData(m.directory, 2)
+					if err != nil {
+						hexData = err.Error()
+					}
+					m.directory = filepath.Dir(m.directory)
+					m.fileData.SetContent(hexData)
+					m.fileData.Width = lipgloss.Width(m.table.View())
+					m.fileData.Height = lipgloss.Height(m.table.View())
+				}
+			case RENAME_FILE:
+				os.Rename(
+					m.directory,
+					filepath.Join(
+						filepath.Dir(m.directory),
+						m.fNameInput.Value(),
+					),
+				)
+				m.fNameInput.Blur()
+				m.table.Focus()
+				m.uiStatus = NORMAL_STATUS
+				m.directory = filepath.Dir(
+					m.directory,
+				)
+				m.files = updateDirectory(m.directory)
+				m.table.SetRows(m.files)
+			}
+		case tea.KeyCtrlR.String():
+			if m.uiStatus == NORMAL_STATUS {
+				m.uiStatus = RENAME_FILE
+				m.table.Blur()
+				m.directory = filepath.Join(
+					m.directory, m.table.SelectedRow()[1],
+				)
+				m.fNameInput.Focus()
 			}
 		}
 	}
 
-	return m, nil
+	m.fNameInput, cmd = m.fNameInput.Update(msg)
+
+	return m, cmd
 }
 
 func (m Model) View() string {
@@ -189,6 +221,10 @@ func (m Model) View() string {
 					fmt.Sprintf(
 						m.textBar,
 						m.directory),
+				)
+			} else if m.uiStatus == RENAME_FILE {
+				return fmt.Sprintf(
+					FILE_NAME_MSG, m.fNameInput.View(),
 				)
 			} else {
 				return lipgloss.JoinHorizontal(
@@ -250,9 +286,12 @@ func updateDirectory(directory string) []table.Row {
 func InitialMode() Model {
 	var m = Model{}
 	var err error
+
 	m.uiStatus = NORMAL_STATUS
 	m.textBar = CURRENT_DIRECTORY
 	m.fileData = viewport.New(10, 10)
+	m.fNameInput = textinput.New()
+
 	if m.directory, err = os.Getwd(); err != nil {
 		panic(err)
 	}
@@ -281,8 +320,6 @@ func InitialMode() Model {
 		table.WithFocused(true),
 		table.WithRows(updateDirectory(m.directory)),
 	)
-
-	m.fNameInput = textinput.New()
 
 	m.style = lipgloss.NewStyle().
 		AlignHorizontal(lipgloss.Top).
