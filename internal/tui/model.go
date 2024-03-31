@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"syscall"
 
 	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -270,6 +271,18 @@ func updateDirectory(directory string) []table.Row {
 		rows = append(
 			rows, table.Row{
 				stat.Mode().String(),
+				func() string {
+					data := stat.Sys().(*syscall.Stat_t)
+					if data == nil {
+						return "Undefined"
+					}
+
+					return fmt.Sprintf(
+						"%d:%d",
+						int(data.Gid),
+						int(data.Uid),
+					)
+				}(),
 				i.Name(),
 				func() string {
 					if !stat.IsDir() {
@@ -321,6 +334,10 @@ func InitialMode() Model {
 				{
 					Title: "Permissions",
 					Width: 12,
+				},
+				{
+					Title: "Owner",
+					Width: 10,
 				},
 				{
 					Title: "File name",
