@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"syscall"
 
 	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -240,11 +239,11 @@ func (m Model) View() string {
 func updateDirectory(directory string) []table.Row {
 	rows := []table.Row{}
 
-	upperF, err := os.Stat("..")
-	if err == nil {
+	upperF, _ := os.Stat("..")
+	if directory != "/" {
 		rows = append(rows, table.Row{
 			upperF.Mode().String(),
-			"",
+			GetFileOwner(upperF),
 			"..",
 			"",
 			upperF.ModTime().Local().Format("2006-01-02 15:04:05"),
@@ -272,18 +271,7 @@ func updateDirectory(directory string) []table.Row {
 		rows = append(
 			rows, table.Row{
 				stat.Mode().String(),
-				func() string {
-					data := stat.Sys().(*syscall.Stat_t)
-					if data == nil {
-						return "Undefined"
-					}
-
-					return fmt.Sprintf(
-						"%d:%d",
-						int(data.Gid),
-						int(data.Uid),
-					)
-				}(),
+				GetFileOwner(stat),
 				i.Name(),
 				func() string {
 					if !stat.IsDir() {
