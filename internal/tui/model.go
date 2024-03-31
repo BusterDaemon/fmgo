@@ -149,7 +149,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyEnter.String(), "return":
 			switch m.uiStatus {
 			case NORMAL_STATUS:
-				m.directory = filepath.Join(m.directory, m.table.SelectedRow()[1])
+				m.directory = filepath.Join(m.directory, m.table.SelectedRow()[2])
 
 				stat, err := os.Stat(m.directory)
 				if err != nil {
@@ -244,6 +244,7 @@ func updateDirectory(directory string) []table.Row {
 	if err == nil {
 		rows = append(rows, table.Row{
 			upperF.Mode().String(),
+			"",
 			"..",
 			"",
 			upperF.ModTime().Local().Format("2006-01-02 15:04:05"),
