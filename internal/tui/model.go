@@ -13,7 +13,7 @@ import (
 )
 
 //go:noinline
-func getMBSize(x float32) float32
+func getMBSize(x float32) (float32, int)
 
 const (
 	NORMAL_STATUS = iota
@@ -261,16 +261,35 @@ func updateDirectory(directory string) []table.Row {
 		if err != nil {
 			continue
 		}
+
+		var (
+			size        float32 = 0
+			measurement int     = 0
+		)
+
 		rows = append(
 			rows, table.Row{
 				stat.Mode().String(),
 				i.Name(),
 				func() string {
 					if !stat.IsDir() {
-						return fmt.Sprintf("%.2f MB",
-							getMBSize(
-								float32(stat.Size()),
-							),
+						return fmt.Sprintf("%f %s",
+							func() float32 {
+								size, measurement = getMBSize(
+									float32(stat.Size()),
+								)
+								return size
+							}(),
+							func() string {
+								switch measurement {
+								case 0:
+									return "MB"
+								case 1:
+									return "KB"
+								default:
+									return "Undefined"
+								}
+							}(),
 						)
 					}
 					return ""
