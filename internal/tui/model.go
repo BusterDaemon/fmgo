@@ -286,7 +286,7 @@ func updateDirectory(directory string) []table.Row {
 				i.Name(),
 				func() string {
 					if !stat.IsDir() {
-						return fmt.Sprintf("%f %s",
+						return fmt.Sprintf("%.2f %s",
 							func() float32 {
 								size, measurement = getMBSize(
 									float32(stat.Size()),
