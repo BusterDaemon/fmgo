@@ -20,6 +20,7 @@ const (
 	DELETE_STATUS
 	READ_FILE
 	RENAME_FILE
+	CREATE_STATUS
 	VIEW_MOUNTPOINTS
 )
 
@@ -87,8 +88,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			if m.uiStatus == NORMAL_STATUS {
 				m.uiStatus = DELETE_STATUS
-				m.directory = filepath.Join(m.directory, m.table.SelectedRow()[1])
+				m.directory = filepath.Join(m.directory, m.table.SelectedRow()[2])
 				m.textBar = CONFIRM_DELETE
+				m.table.Blur()
 				return m, nil
 			}
 		case tea.KeyEsc.String(), tea.KeyEscape.String():
@@ -96,6 +98,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.uiStatus = NORMAL_STATUS
 				m.directory = filepath.Dir(m.directory)
 				m.textBar = CURRENT_DIRECTORY
+				m.table.Focus()
 			}
 
 			if m.uiStatus == READ_FILE {
@@ -192,6 +195,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				)
 				m.files = updateDirectory(m.directory)
 				m.table.SetRows(m.files)
+			case CREATE_STATUS:
+				os.Chdir(m.directory)
+				newDir := m.fNameInput.Value()
+				err := os.Mkdir(
+					newDir,
+					0755,
+				)
+				if err != nil {
+					panic(err)
+				}
+				m.fNameInput.Blur()
+				m.table.Focus()
+				m.files = updateDirectory(m.directory)
+				m.table.SetRows(m.files)
+				m.uiStatus = NORMAL_STATUS
+			case DELETE_STATUS:
+				os.Chdir(filepath.Dir(m.directory))
+				os.RemoveAll(filepath.Base(m.directory))
+				m.table.Focus()
+				m.directory = filepath.Dir(m.directory)
+				m.files = updateDirectory(m.directory)
+				m.table.SetRows(m.files)
+				m.uiStatus = NORMAL_STATUS
 			}
 		case tea.KeyCtrlR.String():
 			if m.uiStatus == NORMAL_STATUS {
@@ -200,6 +226,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.directory = filepath.Join(
 					m.directory, m.table.SelectedRow()[1],
 				)
+				m.fNameInput.Focus()
+			}
+		case tea.KeyCtrlT.String():
+			if m.uiStatus == NORMAL_STATUS {
+				m.uiStatus = CREATE_STATUS
+				m.table.Blur()
 				m.fNameInput.Focus()
 			}
 		}
@@ -222,7 +254,8 @@ func (m Model) View() string {
 						m.textBar,
 						m.directory),
 				)
-			} else if m.uiStatus == RENAME_FILE {
+			} else if m.uiStatus == RENAME_FILE ||
+				m.uiStatus == CREATE_STATUS {
 				return fmt.Sprintf(
 					FILE_NAME_MSG, m.fNameInput.View(),
 				)
