@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"buster_daemon/fmgo/internal/mounts"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -106,6 +107,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.uiStatus = NORMAL_STATUS
 			}
 
+			if m.uiStatus == VIEW_MOUNTPOINTS {
+				m.uiStatus = NORMAL_STATUS
+				m.showFiles()
+			}
+
 			return m, nil
 		case tea.KeyCtrlC.String():
 			return m, tea.Quit
@@ -142,7 +148,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.table.MoveUp(lipgloss.Height(m.table.View()))
 			}
 		case tea.KeyBackspace.String():
-			if m.table.Focused() {
+			if m.table.Focused() && m.uiStatus == NORMAL_STATUS {
 				m.directory = filepath.Dir(m.directory)
 				m.files = updateDirectory(m.directory)
 				m.table.SetRows(updateDirectory(m.directory))
@@ -218,6 +224,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.files = updateDirectory(m.directory)
 				m.table.SetRows(m.files)
 				m.uiStatus = NORMAL_STATUS
+			case VIEW_MOUNTPOINTS:
+				m.directory = m.table.SelectedRow()[0]
+				os.Chdir(m.directory)
+				m.table.Focus()
+				m.files = updateDirectory(m.directory)
+				m.showFiles()
+				m.uiStatus = NORMAL_STATUS
 			}
 		case tea.KeyCtrlR.String():
 			if m.uiStatus == NORMAL_STATUS {
@@ -234,6 +247,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.table.Blur()
 				m.fNameInput.Focus()
 			}
+		case tea.KeyCtrlD.String():
+			if m.uiStatus == NORMAL_STATUS {
+				m.uiStatus = VIEW_MOUNTPOINTS
+				m.showMountPoints()
+				m.table.Focus()
+			}
 		}
 	}
 
@@ -242,11 +261,67 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m *Model) showMountPoints() {
+	rows := []table.Row{}
+
+	mountPoints, _ := mounts.GetMounts()
+	for _, i := range mountPoints {
+		rows = append(rows,
+			table.Row{
+				i,
+			})
+	}
+
+	m.table = table.New(
+		table.WithColumns(
+			[]table.Column{
+				{
+					Title: "Mount Points",
+					Width: 32,
+				},
+			}),
+		table.WithRows(rows),
+		table.WithFocused(true),
+	)
+}
+
+func (m *Model) showFiles() {
+	m.table = table.New(
+		table.WithColumns(
+			[]table.Column{
+				{
+					Title: "Permissions",
+					Width: 12,
+				},
+				{
+					Title: "Owner",
+					Width: 10,
+				},
+				{
+					Title: "File name",
+					Width: 30,
+				},
+				{
+					Title: "File size",
+					Width: 25,
+				},
+				{
+					Title: "Last Modified",
+					Width: 30,
+				},
+			},
+		),
+		table.WithRows(updateDirectory(m.directory)),
+		table.WithFocused(true),
+	)
+}
+
 func (m Model) View() string {
 	return m.style.Render(
 		func() string {
 			if m.uiStatus == NORMAL_STATUS ||
-				m.uiStatus == DELETE_STATUS {
+				m.uiStatus == DELETE_STATUS ||
+				m.uiStatus == VIEW_MOUNTPOINTS {
 				return lipgloss.JoinVertical(
 					lipgloss.Top,
 					m.table.View(),
@@ -350,34 +425,7 @@ func InitialMode() Model {
 		panic(err)
 	}
 
-	m.table = table.New(
-		table.WithColumns(
-			[]table.Column{
-				{
-					Title: "Permissions",
-					Width: 12,
-				},
-				{
-					Title: "Owner",
-					Width: 10,
-				},
-				{
-					Title: "File name",
-					Width: 30,
-				},
-				{
-					Title: "File size",
-					Width: 25,
-				},
-				{
-					Title: "Last Modified",
-					Width: 30,
-				},
-			},
-		),
-		table.WithFocused(true),
-		table.WithRows(updateDirectory(m.directory)),
-	)
+	m.showFiles()
 
 	m.style = lipgloss.NewStyle().
 		AlignHorizontal(lipgloss.Top).
