@@ -237,7 +237,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.uiStatus = RENAME_FILE
 				m.table.Blur()
 				m.directory = filepath.Join(
-					m.directory, m.table.SelectedRow()[1],
+					m.directory, m.table.SelectedRow()[2],
 				)
 				m.fNameInput.Focus()
 			}
