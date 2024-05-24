@@ -6,11 +6,13 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"golang.org/x/term"
 )
 
 //go:noinline
@@ -31,7 +33,7 @@ const (
 	FILE_NAME_MSG     = "Enter new file name: %s"
 )
 
-type Model struct {
+type MainInterface struct {
 	files      []table.Row
 	directory  string
 	textBar    string
@@ -40,34 +42,45 @@ type Model struct {
 	uiStatus   uint8
 	fileData   viewport.Model
 	style      lipgloss.Style
+	ts         table.Styles
+	keys       hotKeys
+	helpM      help.Model
 }
 
-func (m Model) Init() tea.Cmd {
+func (m MainInterface) Init() tea.Cmd {
 	return textinput.Blink
 }
 
-func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m MainInterface) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var (
-		hexData string
-		cmd     tea.Cmd
+		hexData  string
+		cmd      tea.Cmd
+		height   int = 4
+		helpCoef int = 1
 	)
 
 	switch ms := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.style.Width(ms.Width - 4)
-		m.style.Height(ms.Height - 4)
+		m.style.Height(ms.Height - (height + helpCoef))
+		m.helpM.Width = ms.Width
 
 		switch m.uiStatus {
 		case NORMAL_STATUS:
 			m.table.SetWidth(ms.Width - 4)
-			m.table.SetHeight(ms.Height - 4)
+			m.table.SetHeight(ms.Height - (height + helpCoef))
 			m.table.UpdateViewport()
 		case READ_FILE:
 			m.fileData.Width = ms.Width - 4
-			m.fileData.Height = ms.Height - 4
+			m.fileData.Height = ms.Height - (height + helpCoef)
 		}
 	case tea.KeyMsg:
 		switch ms.String() {
+		case "h":
+			m.helpM.ShowAll = !m.helpM.ShowAll
+			m.table.SetHeight(lipgloss.Height(m.View()) + (height + helpCoef))
+			m.table.UpdateViewport()
+			m.showFiles()
 		case "delete":
 			if m.uiStatus == DELETE_STATUS {
 				err := os.Remove(
@@ -102,7 +115,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.table.Focus()
 			}
 
-			if m.uiStatus == READ_FILE {
+			if m.uiStatus == READ_FILE || m.uiStatus == DELETE_STATUS ||
+				m.uiStatus == RENAME_FILE || m.uiStatus == CREATE_STATUS {
 				m.table.Focus()
 				m.uiStatus = NORMAL_STATUS
 			}
@@ -256,12 +270,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	switch m.helpM.ShowAll {
+	case true:
+		helpCoef = 4
+	case false:
+		helpCoef = 1
+	}
+
 	m.fNameInput, cmd = m.fNameInput.Update(msg)
 
 	return m, cmd
 }
 
-func (m *Model) showMountPoints() {
+func (m *MainInterface) showMountPoints() {
 	rows := []table.Row{}
 
 	mountPoints, _ := mounts.GetMounts()
@@ -277,46 +298,52 @@ func (m *Model) showMountPoints() {
 			[]table.Column{
 				{
 					Title: "Mount Points",
-					Width: 32,
+					Width: func() int {
+						w, _, _ := term.GetSize(0)
+						return w
+					}(),
 				},
 			}),
 		table.WithRows(rows),
 		table.WithFocused(true),
+		table.WithStyles(m.ts),
 	)
 }
 
-func (m *Model) showFiles() {
+func (m *MainInterface) showFiles() {
+	w, _, _ := term.GetSize(0)
 	m.table = table.New(
 		table.WithColumns(
 			[]table.Column{
 				{
 					Title: "Permissions",
-					Width: 12,
+					Width: w / 6,
 				},
 				{
 					Title: "Owner",
-					Width: 10,
+					Width: w / 6,
 				},
 				{
 					Title: "File name",
-					Width: 30,
+					Width: w / 6,
 				},
 				{
 					Title: "File size",
-					Width: 25,
+					Width: w / 6,
 				},
 				{
 					Title: "Last Modified",
-					Width: 30,
+					Width: w / 6,
 				},
 			},
 		),
 		table.WithRows(updateDirectory(m.directory)),
 		table.WithFocused(true),
+		table.WithStyles(m.ts),
 	)
 }
 
-func (m Model) View() string {
+func (m MainInterface) View() string {
 	return m.style.Render(
 		func() string {
 			if m.uiStatus == NORMAL_STATUS ||
@@ -328,6 +355,7 @@ func (m Model) View() string {
 					fmt.Sprintf(
 						m.textBar,
 						m.directory),
+					m.helpM.View(m.keys),
 				)
 			} else if m.uiStatus == RENAME_FILE ||
 				m.uiStatus == CREATE_STATUS {
@@ -412,13 +440,17 @@ func updateDirectory(directory string) []table.Row {
 	return rows
 }
 
-func InitialMode() Model {
-	var m = Model{}
+func InitialMode() MainInterface {
+	var m = MainInterface{
+		keys:  keys,
+		helpM: help.New(),
+	}
 	var err error
+	w, h, _ := term.GetSize(0)
 
 	m.uiStatus = NORMAL_STATUS
 	m.textBar = CURRENT_DIRECTORY
-	m.fileData = viewport.New(10, 10)
+	m.fileData = viewport.New(w, h)
 	m.fNameInput = textinput.New()
 
 	if m.directory, err = os.Getwd(); err != nil {
@@ -430,8 +462,23 @@ func InitialMode() Model {
 	m.style = lipgloss.NewStyle().
 		AlignHorizontal(lipgloss.Top).
 		AlignVertical(lipgloss.Top).
-		Border(lipgloss.DoubleBorder(), true)
+		Border(lipgloss.DoubleBorder(), true).
+		Width(w)
+	m.ts = table.DefaultStyles()
+	m.ts.Header = m.ts.Header.
+		Foreground(lipgloss.Color("33"))
+	m.ts.Selected = m.ts.Selected.
+		Foreground(lipgloss.Color("201")).
+		Bold(true)
+	m.table.SetStyles(m.ts)
 
+	helpBaseStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("33"))
+	m.helpM.Styles = help.New().Styles
+	m.helpM.Styles.FullDesc = helpBaseStyle
+	m.helpM.Styles.ShortDesc = helpBaseStyle
+	m.helpM.Styles.FullKey = helpBaseStyle.Foreground(lipgloss.Color("2"))
+	m.helpM.Styles.ShortKey = helpBaseStyle.Foreground(lipgloss.Color("2"))
 	return m
 }
 
