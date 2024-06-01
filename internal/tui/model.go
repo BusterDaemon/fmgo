@@ -96,6 +96,7 @@ func (m MainInterface) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				)
 				m.table.SetRows(updateDirectory(m.directory))
 				m.table.SetCursor(0)
+				m.table.Focus()
 				m.uiStatus = NORMAL_STATUS
 				return m, nil
 			}
